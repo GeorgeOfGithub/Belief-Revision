@@ -4,10 +4,18 @@
 # A formula can just be a string like "p & (q | ~r)" or a nested tuple: ('AND', 'p', ('OR', 'q', ('NOT', 'r')))
 # A belief_base is just a dictionary: {formula: priority_score}
 
-def create_empty_belief_base():
-    """Returns an empty belief base. Just used to create the very first belief base and is thus trivial."""
+def create_initial_belief_base():
+    """
+    Returns an inconsistent belief base for testing entailment and contraction.
+    Format: {formula_string: priority_score}
+    """
     
-    return {}
+    return {
+        "p": 10,           # True belief 1
+        "q | r": 8,        # True belief 2 
+        "s -> t": 5,       # True belief 3 
+        "~p": 2            # Contradictory belief (clashes with "p")
+    }
 
 # ==========================================
 # 2. LOGICAL ENTAILMENT ENGINE
@@ -73,7 +81,6 @@ def test_agm_postulates():
 
 if __name__ == "__main__":
     # Example workflow
-    my_belief_base = create_empty_belief_base()
-    my_belief_base = expand(my_belief_base, "p | q", 1)
+    my_belief_base = create_initial_belief_base()
     
     test_agm_postulates()

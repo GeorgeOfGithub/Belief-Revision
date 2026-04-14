@@ -5,7 +5,8 @@
 # A belief_base is just a dictionary: {formula: priority_score}
 
 def create_empty_belief_base():
-    """Returns an empty belief base."""
+    """Returns an empty belief base. Just used to create the very first belief base and is thus trivial."""
+    
     return {}
 
 # ==========================================
@@ -75,6 +76,7 @@ def test_agm_postulates():
     """
     # TODO: Set up initial belief base dictionaries and assert that the outputs 
     # of your expand, contract, and revise functions follow the rules.
+    print("Testing AGM postulates...")
     pass
 
 if __name__ == "__main__":

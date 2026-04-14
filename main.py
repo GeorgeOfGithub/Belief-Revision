@@ -15,7 +15,8 @@ def create_empty_belief_base():
 
 def to_cnf(formula):
     """
-    Converts a propositional formula string/tuple into Conjunctive Normal Form (CNF).
+    Converts a propositional formula string/tuple into Conjunctive Normal Form (CNF). 
+    WE DONT NEED TO USE THIS IF WE DON'T WANT TO FOR THE ASSIGNMENT
     """
     pass # TODO: Implement CNF conversion steps
 
@@ -55,15 +56,6 @@ def contract(belief_base, formula):
     new_bb = belief_base.copy()
     # TODO: Implement contraction logic (e.g., partial meet contraction) using the priority values
     return new_bb
-
-def revise(belief_base, formula, priority):
-    """
-    Revises the belief base with a new formula.
-    Levi Identity: revise(F) = expand(contract(NOT F), F)
-    """
-    # TODO: Implement the sequence using the contract and expand functions above
-    pass
-
 
 # ==========================================
 # 4. TESTING AGM POSTULATES

@@ -11,10 +11,10 @@ def create_initial_belief_base():
     """
     
     return {
-        "p": 10,                   # True belief 1
-        ("OR", "q", "r"): 8,       # True belief 2 
-        ("IMPLIES", "s", "t"): 5,  # True belief 3 
-        ("NOT", "p"): 2            # Contradictory belief (clashes with "p")
+        "p": 10,           # True belief 1
+        "q | r": 8,        # True belief 2 
+        "s -> t": 5,       # True belief 3 
+        "~p": 2            # Contradictory belief (clashes with "p")
     }
 
 # ==========================================

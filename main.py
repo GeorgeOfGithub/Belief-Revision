@@ -46,6 +46,39 @@ def is_binary(formula):
 def is_tuple_formula(formula):
     return isinstance(formula, tuple)
 
+# Helper function to find the main operator in a formula string, ignoring parentheses
+def find_main_operator(formula,operator):
+    depth =0
+    i=0
+    while i<len(formula):
+         char = formula[i]
+         if char == '(':
+                depth += 1
+         elif char == ')':
+                depth -= 1
+         elif depth == 0:
+             # Check if the operator matches at this position   
+             if formula[i:i+len(operator)] == operator:
+                 return i
+         i+=1
+    return -1
+             
+
+def has_outer_parentheses(formula):
+    formula =formula.strip()
+    if not (formula.startswith('(') and formula.endswith(')')):
+        return False
+    depth = 0
+    for i, char in enumerate(formula):
+        if char == '(':
+            depth += 1
+        elif char == ')':
+            depth -= 1
+            if depth == 0 and i != len(formula) - 1:
+                return False
+    return depth == 0
+    
+
 # For the sake of this assignment, we will assume that the input formulas are already in the correct internal tuple format.
 def parse_formula(formula_str):
     """
@@ -70,20 +103,26 @@ def parse_formula(formula_str):
     formula_str = formula_str.strip()
     
     # Remove outer parentheses if they exist
-    if formula_str.startswith('(') and formula_str.endswith(')'):
+    while has_outer_parentheses(formula_str):
         formula_str = formula_str[1:-1].strip()
         
     # Implication
-    if '->' in formula_str:
-        left, right = formula_str.split('->', 1)
+    idx = find_main_operator(formula_str,'->')
+    if idx != -1:
+        left = formula_str[:idx]
+        right = formula_str[idx+2:]
         return ('IMP', parse_formula(left.strip()), parse_formula(right.strip()))
     # Disjunction
-    if '|' in formula_str:
-        left, right = formula_str.split('|', 1)
+    idx = find_main_operator(formula_str,'|')
+    if idx != -1:
+        left = formula_str[:idx]
+        right = formula_str[idx+1:]
         return ('OR', parse_formula(left.strip()), parse_formula(right.strip()))
     # Conjunction
-    if '&' in formula_str:
-        left, right = formula_str.split('&', 1)
+    idx = find_main_operator(formula_str,'&')
+    if idx != -1:
+        left = formula_str[:idx]
+        right = formula_str[idx+1:]
         return ('AND', parse_formula(left.strip()), parse_formula(right.strip()))
     # Negation
     if formula_str.startswith('~'):
@@ -175,18 +214,20 @@ def to_cnf(formula):
     Converts a propositional formula string/tuple into Conjunctive Normal Form (CNF). 
     WE DONT NEED TO USE THIS IF WE DON'T WANT TO FOR THE ASSIGNMENT
     """
+   # Parse the formula if it's a string
+    if isinstance(formula, str):
+        formula = parse_formula(formula)
+   
    # Eliminate implications and biconditionals, move negations inward, and distribute OR over AND to get CNF.
-   #formula = eliminate_implications(formula)
+    formula = eliminate_implications(formula)
    
    # Move NOT inward
-   #formula = move_negations(formula)
+    formula = move_negations(formula)
    
    # Distribute OR over AND
     formula = distribute_or_over_and(formula)
     return formula
    
-
-
 
 def resolve(clause1, clause2):
     """
@@ -243,8 +284,33 @@ if __name__ == "__main__":
     # Example workflow
     my_belief_base = create_initial_belief_base()
     
-    print("Testing parse_formula:")
-    for f in my_belief_base:
-        print(f, "->", parse_formula(f))
+    # print("Testing parse_formula:")
+    # for f in my_belief_base:
+    #     print(f, "->", parse_formula(f))
+        
+    # print(parse_formula ("s -> t"))
+    # print (eliminate_implications(parse_formula ("s -> t")))
+    # print(parse_formula("(p -> q) & (q -> p)"))
+    
+    test_formula =[
+        "p",
+        "~p",
+        "q | r",
+        "p & q",
+        "s -> t",
+        "~(p & q)",
+        "~(p | q)",
+        "(p & q) | r",
+        "(p -> q) & (q -> p)"
+        ]
+    print ("=====================================")
+    print ("Testing to_cnf:\n")
+    for f in test_formula:
+        print(f, "->", to_cnf(f))
+        print ("=====================================")
+        print("Original: ",f)
+        print ("Parsed:", parse_formula(f))
+        print ("CNF:", to_cnf(f))
+        print("-" *40)
         
     test_agm_postulates()

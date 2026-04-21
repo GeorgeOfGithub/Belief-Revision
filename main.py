@@ -254,7 +254,11 @@ def expand(belief_base, formula, priority):
     """
     # Create a copy so we don't mutate the original dictionary
     new_bb = belief_base.copy() 
-    # TODO: Add the formula and priority to new_bb
+
+    parsed_formula = parse_formula(formula)
+
+    new_bb[parsed_formula] = priority
+
     return new_bb
 
 def contract(belief_base, formula):

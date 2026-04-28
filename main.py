@@ -261,13 +261,66 @@ def expand(belief_base, formula, priority):
 
     return new_bb
 
+def get_combinations(lst, r):
+    """
+    Recursive helper function to get all combinations of size 'r' from a list.
+    """
+    if r == 0:
+        return [[]]
+    if len(lst) == 0:
+        return []
+    with_first = [[lst[0]] + rest for rest in get_combinations(lst[1:], r - 1)]
+    without_first = get_combinations(lst[1:], r)
+    return with_first + without_first
+
+def get_all_subsets(iterable):
+    """
+    Generates all possible subsets from largest to smallest.
+    Returns a list of lists, where each inner list contains subsets of a specific size.
+    """
+    s = list(iterable)
+    n = len(s)
+    subsets_by_size = []
+    for r in range(n, -1, -1):
+        subsets_by_size.append(get_combinations(s, r))      
+    return subsets_by_size
+
 def contract(belief_base, formula):
     """
-    Implementation of contraction of belief base (based on a priority order on formulas).
-    Returns a NEW dictionary representing the resulting/new belief base.
+    Implementation of partial meet contraction[cite: 157, 161].
+    Returns a NEW dictionary representing the contracted belief base.
     """
-    new_bb = belief_base.copy()
-    # TODO: Implement contraction logic (e.g., partial meet contraction) using the priority values
+    parsed_formula = parse_formula(formula)
+    if not check_entailment(list(belief_base.keys()), parsed_formula):
+        return belief_base.copy()
+
+    remainders = []
+    subsets_by_size = get_all_subsets(belief_base.keys())
+    
+    for size_group in subsets_by_size:
+        for subset in size_group:
+            # Check if this subset entails the formula
+            if not check_entailment(list(subset), parsed_formula):
+                remainders.append(set(subset))
+        if remainders:
+            break 
+            
+    scored_remainders = []
+    for rem in remainders:
+        score = sum(belief_base[f] for f in rem)
+        scored_remainders.append((score, rem))
+        
+    max_score = max(scored_remainders, key=lambda item: item[0])[0]
+    best_remainders = [rem for score, rem in scored_remainders if score == max_score]
+    
+    # Partial Meet (Intersection of the chosen remainders)
+    final_formulas = best_remainders[0]
+    for rem in best_remainders[1:]:
+        final_formulas = final_formulas.intersection(rem)
+        
+    # Reconstruct the new belief base dictionary with the surviving formulas
+    new_bb = {f: belief_base[f] for f in final_formulas}
+    
     return new_bb
 
 # ==========================================

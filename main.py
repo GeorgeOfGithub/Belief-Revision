@@ -1,373 +1,385 @@
 # ==========================================
-# 1. CORE DATA STRUCTURES
+# 1. CORE DATA STRUCTURES (AST)
 # ==========================================
-# A formula can just be a string like "p & (q | ~r)" or a nested tuple: ('AND', 'p', ('OR', 'q', ('NOT', 'r')))
-# A belief_base is just a dictionary: {formula: priority_score}
 
-# Internal representation used after parsing:
-# "p"                  -> atomic formula
-# ('NOT', 'p')         -> negation
-# ('AND', a, b)        -> conjunction
-# ('OR', a, b)         -> disjunction
-# ('IMP', a, b)        -> implication
-# ('IFF', a, b)        -> equivalence
+class Formula:
+    """
+    Base class for all propositional logic formulas.
+    Implements the transformation pipeline for Conjunctive Normal Form (CNF).
+    """
+    def eliminate_implications(self): raise NotImplementedError
+    def move_negations(self): raise NotImplementedError
+    def distribute_or_over_and(self): raise NotImplementedError
+    
+    def to_cnf(self):
+        """
+        Converts a formula into CNF using a three-step logical pipeline:
+        1. Eliminate implications and biconditionals.
+        2. Move negations inward using De Morgan's laws.
+        3. Distribute OR over AND.
+        """
+        f = self.eliminate_implications()
+        f = f.move_negations()
+        f = f.distribute_or_over_and()
+        return f
 
-# belief_base format:
-#   {formula_string: priority_score}
+class Symbol(Formula):
+    """Represents an atomic proposition (e.g., 'p')."""
+    def __init__(self, name):
+        self.name = name
 
-def create_empty_belief_base():
-    return {}
+    def eliminate_implications(self): return self
+    def move_negations(self): return self
+    def distribute_or_over_and(self): return self
+
+    def __eq__(self, other): return isinstance(other, Symbol) and self.name == other.name
+    def __hash__(self): return hash(("Symbol", self.name))
+    def __repr__(self): return self.name
+
+
+class Not(Formula):
+    """Represents logical negation (~)."""
+    def __init__(self, inner):
+        self.inner = inner
+
+    def eliminate_implications(self):
+        return Not(self.inner.eliminate_implications())
+
+    def move_negations(self):
+        # Double negation: ~~A -> A
+        if isinstance(self.inner, Not):
+            return self.inner.inner.move_negations()
+        # De Morgan's: ~(A & B) -> ~A | ~B
+        if isinstance(self.inner, And):
+            return Or(Not(self.inner.left), Not(self.inner.right)).move_negations()
+        # De Morgan's: ~(A | B) -> ~A & ~B
+        if isinstance(self.inner, Or):
+            return And(Not(self.inner.left), Not(self.inner.right)).move_negations()
+        return Not(self.inner.move_negations())
+
+    def distribute_or_over_and(self):
+        return Not(self.inner.distribute_or_over_and())
+
+    def __eq__(self, other): return isinstance(other, Not) and self.inner == other.inner
+    def __hash__(self): return hash(("Not", self.inner))
+    def __repr__(self): return f"~{self.inner}"
+
+
+class And(Formula):
+    """Represents logical conjunction (&)."""
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+
+    def eliminate_implications(self):
+        return And(self.left.eliminate_implications(), self.right.eliminate_implications())
+    
+    def move_negations(self):
+        return And(self.left.move_negations(), self.right.move_negations())
+
+    def distribute_or_over_and(self):
+        return And(self.left.distribute_or_over_and(), self.right.distribute_or_over_and())
+
+    def __eq__(self, other): return isinstance(other, And) and self.left == other.left and self.right == other.right
+    def __hash__(self): return hash(("And", self.left, self.right))
+    def __repr__(self): return f"({self.left} & {self.right})"
+
+
+class Or(Formula):
+    """Represents logical disjunction (|)."""
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+
+    def eliminate_implications(self):
+        return Or(self.left.eliminate_implications(), self.right.eliminate_implications())
+
+    def move_negations(self):
+        return Or(self.left.move_negations(), self.right.move_negations())
+
+    def distribute_or_over_and(self):
+        l = self.left.distribute_or_over_and()
+        r = self.right.distribute_or_over_and()
+        # Distribution Rule: (A & B) | C -> (A | C) & (B | C)
+        if isinstance(l, And):
+            return And(Or(l.left, r).distribute_or_over_and(), 
+                       Or(l.right, r).distribute_or_over_and())
+        # Distribution Rule: A | (B & C) -> (A | B) & (A | C)
+        elif isinstance(r, And):
+            return And(Or(l, r.left).distribute_or_over_and(), 
+                       Or(l, r.right).distribute_or_over_and())
+        return Or(l, r)
+
+    def __eq__(self, other): return isinstance(other, Or) and self.left == other.left and self.right == other.right
+    def __hash__(self): return hash(("Or", self.left, self.right))
+    def __repr__(self): return f"({self.left} | {self.right})"
+
+
+class Implies(Formula):
+    """Represents logical implication (->)."""
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+
+    def eliminate_implications(self):
+        # A -> B is equivalent to ~A | B
+        return Or(Not(self.left.eliminate_implications()), self.right.eliminate_implications())
+
+    def move_negations(self):
+        return Implies(self.left.move_negations(), self.right.move_negations())
+
+    def distribute_or_over_and(self):
+        return Implies(self.left.distribute_or_over_and(), self.right.distribute_or_over_and())
+
+    def __eq__(self, other): return isinstance(other, Implies) and self.left == other.left and self.right == other.right
+    def __hash__(self): return hash(("Implies", self.left, self.right))
+    def __repr__(self): return f"({self.left} -> {self.right})"
+
+
+class BiImplies(Formula):
+    """Represents logical equivalence (<->)."""
+    def __init__(self, left, right):
+        self.left = left
+        self.right = right
+
+    def eliminate_implications(self):
+        # A <-> B is equivalent to (A -> B) & (B -> A)
+        l_elim = self.left.eliminate_implications()
+        r_elim = self.right.eliminate_implications()
+        return And(Or(Not(l_elim), r_elim), Or(Not(r_elim), l_elim))
+
+    def move_negations(self):
+        return BiImplies(self.left.move_negations(), self.right.move_negations())
+
+    def distribute_or_over_and(self):
+        return BiImplies(self.left.distribute_or_over_and(), self.right.distribute_or_over_and())
+
+    def __eq__(self, other): return isinstance(other, BiImplies) and self.left == other.left and self.right == other.right
+    def __hash__(self): return hash(("BiImplies", self.left, self.right))
+    def __repr__(self): return f"({self.left} <-> {self.right})"
+
+
+# ==========================================
+# 2. BELIEF BASE INITIALIZATION
+# ==========================================
 
 def create_initial_belief_base():
-    """
-    Returns an inconsistent belief base for testing entailment and contraction.
-    Format: {formula_string: priority_score}
-    """
-    
+    """Returns a standard inconsistent belief base for testing."""
+    p, q, r, s, t = Symbol("p"), Symbol("q"), Symbol("r"), Symbol("s"), Symbol("t")
     return {
-        "p": 10,           # True belief 1
-        "q | r": 8,        # True belief 2 
-        "s -> t": 5,       # True belief 3 
-        "~p": 2            # Contradictory belief (clashes with "p")
+        p: 10,
+        Or(q, r): 8,
+        Implies(s, t): 5,
+        Not(p): 2
     }
 
-# Helper functions to identify formula types    
-def is_atom(formula):
-    return isinstance(formula, str)
-# Note: In a more complete implementation, we would also want to handle parentheses 
-# and operator precedence when parsing strings into the internal tuple representation. 
-# For simplicity, we assume the input is already in the correct format or that parsing is handled separately.
-def is_negation(formula):
-    return isinstance(formula, tuple) and len(formula) == 2 and formula[0] == 'NOT'
-# For binary operators, we check if it's a tuple of length 3 and the first element is one of the valid operators.
-def is_binary(formula):
-    return isinstance(formula, tuple) and len(formula) == 3 and formula[0] in ('AND', 'OR', 'IMP', 'IFF')
-# We can also add specific checks for each operator if needed, e.g., is_conjunction, is_disjunction, etc.
-def is_tuple_formula(formula):
-    return isinstance(formula, tuple)
-
-# Helper function to find the main operator in a formula string, ignoring parentheses
-def find_main_operator(formula,operator):
-    depth =0
-    i=0
-    while i<len(formula):
-         char = formula[i]
-         if char == '(':
-                depth += 1
-         elif char == ')':
-                depth -= 1
-         elif depth == 0:
-             # Check if the operator matches at this position   
-             if formula[i:i+len(operator)] == operator:
-                 return i
-         i+=1
-    return -1
-             
-
-def has_outer_parentheses(formula):
-    formula =formula.strip()
-    if not (formula.startswith('(') and formula.endswith(')')):
-        return False
-    depth = 0
-    for i, char in enumerate(formula):
-        if char == '(':
-            depth += 1
-        elif char == ')':
-            depth -= 1
-            if depth == 0 and i != len(formula) - 1:
-                return False
-    return depth == 0
-    
-
-# For the sake of this assignment, we will assume that the input formulas are already in the correct internal tuple format.
-def parse_formula(formula_str):
-    """
-    Converts a formula string into the internal tuple representation.
-
-    Supported operators:
-      ~   negation
-      &   conjunction
-      |   disjunction
-      ->  implication
-
-    Examples:
-      "p"      -> "p"
-      "~p"     -> ('NOT', 'p')
-      "q | r"  -> ('OR', 'q', 'r')
-      "s -> t" -> ('IMP', 's', 't')
-
-    """
-    if not isinstance(formula_str, str):
-        return formula_str # Already in tuple form, return as is
-    
-    formula_str = formula_str.strip()
-    
-    # Remove outer parentheses if they exist
-    while has_outer_parentheses(formula_str):
-        formula_str = formula_str[1:-1].strip()
-        
-    # Implication
-    idx = find_main_operator(formula_str,'->')
-    if idx != -1:
-        left = formula_str[:idx]
-        right = formula_str[idx+2:]
-        return ('IMP', parse_formula(left.strip()), parse_formula(right.strip()))
-    # Disjunction
-    idx = find_main_operator(formula_str,'|')
-    if idx != -1:
-        left = formula_str[:idx]
-        right = formula_str[idx+1:]
-        return ('OR', parse_formula(left.strip()), parse_formula(right.strip()))
-    # Conjunction
-    idx = find_main_operator(formula_str,'&')
-    if idx != -1:
-        left = formula_str[:idx]
-        right = formula_str[idx+1:]
-        return ('AND', parse_formula(left.strip()), parse_formula(right.strip()))
-    # Negation
-    if formula_str.startswith('~'):
-        return ('NOT', parse_formula(formula_str[1:].strip()))
-    
-    # Atomic formula
-    return formula_str  
 
 # ==========================================
-# 2. LOGICAL ENTAILMENT ENGINE
+# 3. LOGICAL ENTAILMENT ENGINE
 # ==========================================
 
-def eliminate_implications(formula):
-    """
-    Recursively eliminates implications and biconditionals from the formula.
-    """
-    if is_atom(formula):
-        return formula
-    if is_negation(formula):
-        return ('NOT', eliminate_implications(formula[1]))
-    if is_binary(formula):
-        op, left, right = formula
-        left = eliminate_implications(left)
-        right = eliminate_implications(right)
-        if op == 'IMP':
-            # A -> B is equivalent to ~A | B
-            return ('OR', ('NOT', left), right)
-        elif op == 'IFF':
-            # A <-> B is equivalent to (A -> B) & (B -> A)
-            return ('AND', 
-                    ('OR', ('NOT', left), right), 
-                    ('OR', ('NOT', right), left))
-        else:
-            return (op, left, right)
-    return formula
+def extract_literals(formula):
+    """Recursively collects literals from a disjunction."""
+    if isinstance(formula, Or):
+        return extract_literals(formula.left).union(extract_literals(formula.right))
+    return {formula}
 
-def move_negations(formula):
-    """
-    Recursively moves negations inward using De Morgan's laws.
-    """
-    if is_atom(formula):
-        return formula
-    if is_negation(formula):
-        inner = formula[1]
-        if is_atom(inner):
-            return formula
-        if is_negation(inner):
-            # ~~A is equivalent to A
-            return move_negations(inner[1])
-        if is_binary(inner):
-            op, left, right = inner
-            if op == 'AND':
-                # ~(A & B) is equivalent to ~A | ~B
-                return ('OR', move_negations(('NOT', left)), move_negations(('NOT', right)))
-            elif op == 'OR':
-                # ~(A | B) is equivalent to ~A & ~B
-                return ('AND', move_negations(('NOT', left)), move_negations(('NOT', right)))
-    if is_binary(formula):
-        op, left, right = formula
-        return (op, move_negations(left), move_negations(right))
-    return formula
+def extract_clauses(formula):
+    """Recursively collects clauses from a conjunction."""
+    if isinstance(formula, And):
+        return extract_clauses(formula.left) + extract_clauses(formula.right)
+    return [extract_literals(formula)]
 
-def distribute_or_over_and(formula):
-    """
-    Recursively distributes OR over AND to get CNF.
-    """
-    if is_atom(formula) or is_negation(formula):
-        return formula
-    if is_binary(formula):
-        op, left, right = formula
-        left = distribute_or_over_and(left)
-        right = distribute_or_over_and(right)
-        if op == 'OR':
-            if is_binary(left) and left[0] == 'AND':
-                # A | (B & C) is equivalent to (A | B) & (A | C)
-                return ('AND', 
-                        distribute_or_over_and(('OR', left[1], right)), 
-                        distribute_or_over_and(('OR', left[2], right)))
-            elif is_binary(right) and right[0] == 'AND':
-                # (A & B) | C is equivalent to (A | C) & (B | C)
-                return ('AND', 
-                        distribute_or_over_and(('OR', left, right[1])), 
-                        distribute_or_over_and(('OR', left, right[2])))
-        return (op, left, right)
-    return formula
+def is_complementary(l1, l2):
+    """Checks if two literals are complements (e.g., p and ~p)."""
+    if isinstance(l1, Not) and l1.inner == l2: return True
+    if isinstance(l2, Not) and l2.inner == l1: return True
+    return False
 
-def to_cnf(formula):
-    """
-    Converts a propositional formula string/tuple into Conjunctive Normal Form (CNF). 
-    WE DONT NEED TO USE THIS IF WE DON'T WANT TO FOR THE ASSIGNMENT
-    """
-   # Parse the formula if it's a string
-    if isinstance(formula, str):
-        formula = parse_formula(formula)
-   
-   # Eliminate implications and biconditionals, move negations inward, and distribute OR over AND to get CNF.
-    formula = eliminate_implications(formula)
-   
-   # Move NOT inward
-    formula = move_negations(formula)
-   
-   # Distribute OR over AND
-    formula = distribute_or_over_and(formula)
-    return formula
-   
+def is_tautology(clause):
+    """Checks if a clause is a tautology (contains p | ~p)."""
+    for literal in clause:
+        if isinstance(literal, Not) and literal.inner in clause: return True
+    return False
 
 def resolve(clause1, clause2):
-    """
-    Helper function to resolve two clauses.
-    """
-    pass # TODO: Implement resolution step
+    """Applies the resolution rule to two clauses."""
+    resolvents = []
+    for l1 in clause1:
+        for l2 in clause2:
+            if is_complementary(l1, l2):
+                # New clause = (C1 - {l1}) U (C2 - {l2})
+                c1_mod = set(clause1); c1_mod.remove(l1)
+                c2_mod = set(clause2); c2_mod.remove(l2)
+                new_clause = c1_mod.union(c2_mod)
+                if not is_tautology(new_clause):
+                    resolvents.append(frozenset(new_clause))
+    return resolvents
 
-def check_entailment(belief_base, formula):
-    """
-    Checks if the given belief_base (dict) entails the formula.
-    Returns True if entailed, False otherwise.
-    """
-    pass # TODO: Implement the full resolution-based entailment loop without packages
+def check_entailment(belief_base_list, query):
+    """Checks KB |= query using Resolution Proof by Refutation."""
+    # To prove KB |= query, we check if KB & ~query is unsatisfiable
+    statements = belief_base_list + [Not(query)]
+    clauses = set()
+    for s in statements:
+        for c in extract_clauses(s.to_cnf()):
+            clauses.add(frozenset(c))
+    
+    while True:
+        clauses_list = list(clauses)
+        n = len(clauses_list)
+        new = set()
+        for i in range(n):
+            for j in range(i + 1, n):
+                for res in resolve(clauses_list[i], clauses_list[j]):
+                    if not res: return True # Empty clause found
+                    new.add(res)
+        if new.issubset(clauses): return False
+        clauses.update(new)
 
 
 # ==========================================
-# 3. BELIEF REVISION OPERATIONS
+# 4. BELIEF REVISION OPERATIONS
 # ==========================================
 
 def expand(belief_base, formula, priority):
-    """
-    Implementation of expansion of belief base.
-    Returns a NEW dictionary representing the resulting/new belief base.
-    """
-    # Create a copy so we don't mutate the original dictionary
-    new_bb = belief_base.copy() 
-
-    parsed_formula = parse_formula(formula)
-
-    new_bb[parsed_formula] = priority
-
+    """B + phi: Simply adds the formula to the base."""
+    new_bb = belief_base.copy()
+    new_bb[formula] = priority
     return new_bb
 
 def get_combinations(lst, r):
-    """
-    Recursive helper function to get all combinations of size 'r' from a list.
-    """
-    if r == 0:
-        return [[]]
-    if len(lst) == 0:
-        return []
-    with_first = [[lst[0]] + rest for rest in get_combinations(lst[1:], r - 1)]
-    without_first = get_combinations(lst[1:], r)
-    return with_first + without_first
-
-def get_all_subsets(iterable):
-    """
-    Generates all possible subsets from largest to smallest.
-    Returns a list of lists, where each inner list contains subsets of a specific size.
-    """
-    s = list(iterable)
-    n = len(s)
-    subsets_by_size = []
-    for r in range(n, -1, -1):
-        subsets_by_size.append(get_combinations(s, r))      
-    return subsets_by_size
+    """Helper to generate all combinations of size r."""
+    if r == 0: return [[]]
+    if not lst: return []
+    return [[lst[0]] + rest for rest in get_combinations(lst[1:], r - 1)] + get_combinations(lst[1:], r)
 
 def contract(belief_base, formula):
-    """
-    Implementation of partial meet contraction[cite: 157, 161].
-    Returns a NEW dictionary representing the contracted belief base.
-    """
-    parsed_formula = parse_formula(formula)
-    if not check_entailment(list(belief_base.keys()), parsed_formula):
+    """B / phi: Partial Meet Contraction using Epistemic Entrenchment."""
+    if not check_entailment(list(belief_base.keys()), formula):
         return belief_base.copy()
 
-    remainders = []
-    subsets_by_size = get_all_subsets(belief_base.keys())
-    
-    for size_group in subsets_by_size:
-        for subset in size_group:
-            # Check if this subset entails the formula
-            if not check_entailment(list(subset), parsed_formula):
-                remainders.append(set(subset))
-        if remainders:
-            break 
-            
-    scored_remainders = []
-    for rem in remainders:
-        score = sum(belief_base[f] for f in rem)
-        scored_remainders.append((score, rem))
-        
-    max_score = max(scored_remainders, key=lambda item: item[0])[0]
-    best_remainders = [rem for score, rem in scored_remainders if score == max_score]
-    
-    # Partial Meet (Intersection of the chosen remainders)
-    final_formulas = best_remainders[0]
-    for rem in best_remainders[1:]:
-        final_formulas = final_formulas.intersection(rem)
-        
-    # Reconstruct the new belief base dictionary with the surviving formulas
-    new_bb = {f: belief_base[f] for f in final_formulas}
-    
-    return new_bb
+    keys = list(belief_base.keys())
+    all_valid = []
+    for r in range(len(keys) + 1):
+        for subset in get_combinations(keys, r):
+            if not check_entailment(subset, formula):
+                all_valid.append(set(subset))
+
+    # Find maximal subsets (remainders)
+    remainders = [s for s in all_valid if not any(s < other for other in all_valid)]
+    if not remainders: return belief_base.copy()
+
+    # Selection function based on priority scores
+    scored = [(sum(belief_base[f] for f in rem), rem) for rem in remainders]
+    max_score = max(scored, key=lambda x: x[0])[0]
+    best = [rem for score, rem in scored if score == max_score]
+
+    # Intersection of best remainders
+    final_set = set(best[0])
+    for rem in best[1:]: final_set &= set(rem)
+    return {f: belief_base[f] for f in final_set}
+
+def revise(belief_base, formula, priority):
+    """B * phi: Revision via Levi Identity (B / ~phi) + phi."""
+    return expand(contract(belief_base, Not(formula)), formula, priority)
+
 
 # ==========================================
-# 4. TESTING AGM POSTULATES
+# 5. TESTING AGM POSTULATES
 # ==========================================
 
 def test_agm_postulates():
-    """
-    You are requested to use the AGM postulates to test your algorithm.
-    (Success, Inclusion, Vacuity, Consistency, and Extensionality).
-    """
-    # TODO: Set up initial belief base dictionaries and assert that the outputs 
-    # of your expand, contract, and revise functions follow the rules.
-    print("Testing AGM postulates...")
-    pass
+    """Full programmatic test of all 16 AGM postulates."""
+    print("\n" + "="*50)
+    print("4. TESTING AGM POSTULATES")
+    print("="*50 + "\n")
+
+    p, q, r = Symbol("p"), Symbol("q"), Symbol("r")
+    
+    # Setup specific test bases to ensure non-trivial results
+    con_base = {p: 5, q: 10} # Base for Contraction tests
+    rev_base = {p: 10, r: 5} # Base for Revision tests
+
+    print("--- CONTRACTION POSTULATES ---")
+    c_p = contract(con_base, p); c_pq = contract(con_base, And(p, q)); c_q = contract(con_base, q)
+
+    print(f"1. Closure Postulate:      {'PASSED' if check_entailment(list(c_pq.keys()), Or(q, r)) else 'FAILED'}")
+    print(f"2. Success Postulate:      {'PASSED' if not check_entailment(list(c_p.keys()), p) else 'FAILED'}")
+    print(f"3. Inclusion Postulate:    {'PASSED' if set(c_p.keys()).issubset(set(con_base.keys())) else 'FAILED'}")
+    s = Symbol("s"); c_vac = contract(con_base, s)
+    print(f"4. Vacuity Postulate:      {'PASSED' if set(c_vac.keys()) == set(con_base.keys()) else 'FAILED'}")
+    c_ext = contract(con_base, Not(Not(p)))
+    print(f"5. Extensionality Post:    {'PASSED' if set(c_p.keys()) == set(c_ext.keys()) else 'FAILED'}")
+    rec_base = expand(c_p, p, 5)
+    print(f"6. Recovery Postulate:     {'PASSED' if all(check_entailment(list(rec_base.keys()), f) for f in con_base.keys()) else 'FAILED'}")
+    if not check_entailment(list(c_pq.keys()), p):
+        print(f"7. Conjunctive Inclusion:  {'PASSED' if set(c_pq.keys()).issubset(set(c_p.keys())) else 'FAILED'}")
+    else: print("7. Conjunctive Inclusion:  SKIPPED")
+    overlap = set(c_p.keys()).intersection(set(c_q.keys()))
+    print(f"8. Conjunctive Overlap:    {'PASSED' if overlap.issubset(set(c_pq.keys())) else 'FAILED'}")
+
+    print("\n--- REVISION POSTULATES ---")
+    phi = And(p, q); revised = revise(rev_base, phi, 5)
+
+    print(f"1. Closure Postulate:      {'PASSED' if check_entailment(list(revised.keys()), Or(p, r)) else 'FAILED'}")
+    print(f"2. Success Postulate:      {'PASSED' if phi in revised else 'FAILED'}")
+    print(f"3. Inclusion Postulate:    {'PASSED' if set(revised.keys()).issubset(set(expand(rev_base, phi, 5).keys())) else 'FAILED'}")
+    rev_vac = revise(rev_base, r, 5); exp_vac = expand(rev_base, r, 5)
+    print(f"4. Vacuity Postulate:      {'PASSED' if set(rev_vac.keys()) == set(exp_vac.keys()) else 'FAILED'}")
+    print(f"5. Consistency Postulate:  {'PASSED' if not check_entailment(list(revised.keys()), And(p, Not(p))) else 'FAILED'}")
+    f1, f2 = Implies(p, q), Or(Not(p), q)
+    r1, r2 = revise(rev_base, f1, 5), revise(rev_base, f2, 5)
+    ext_pass = all(check_entailment(list(r1.keys()), f) for f in r2.keys()) and all(check_entailment(list(r2.keys()), f) for f in r1.keys())
+    print(f"6. Extensionality Post:    {'PASSED' if ext_pass else 'FAILED'}")
+    rev_p = revise(rev_base, p, 10); exp_rev_p_q = expand(rev_p, q, 5)
+    print(f"7. Superexpansion Post:    {'PASSED' if all(check_entailment(list(exp_rev_p_q.keys()), f) for f in revised.keys()) else 'FAILED'}")
+    if not check_entailment(list(rev_p.keys()), Not(q)):
+        print(f"8. Subexpansion Post:      {'PASSED' if all(check_entailment(list(revised.keys()), f) for f in exp_rev_p_q.keys()) else 'FAILED'}")
+    else: print("8. Subexpansion Post:      SKIPPED")
+    print("\n" + "="*50 + "\n")
+
+
+# ==========================================
+# 6. MAIN EXECUTION & DEMO
+# ==========================================
 
 if __name__ == "__main__":
-    # Example workflow
-    my_belief_base = create_initial_belief_base()
-    
-    # print("Testing parse_formula:")
-    # for f in my_belief_base:
-    #     print(f, "->", parse_formula(f))
-        
-    # print(parse_formula ("s -> t"))
-    # print (eliminate_implications(parse_formula ("s -> t")))
-    # print(parse_formula("(p -> q) & (q -> p)"))
-    
-    test_formula =[
-        "p",
-        "~p",
-        "q | r",
-        "p & q",
-        "s -> t",
-        "~(p & q)",
-        "~(p | q)",
-        "(p & q) | r",
-        "(p -> q) & (q -> p)"
-        ]
-    print ("=====================================")
-    print ("Testing to_cnf:\n")
-    for f in test_formula:
-        print(f, "->", to_cnf(f))
-        print ("=====================================")
-        print("Original: ",f)
-        print ("Parsed:", parse_formula(f))
-        print ("CNF:", to_cnf(f))
-        print("-" *40)
-        
+    p, q, r = Symbol("p"), Symbol("q"), Symbol("r")
+
+    # --- Section 1: CNF Transform Demo ---
+    print("\n" + "="*50)
+    print("1. TESTING AST TO_CNF PIPELINE")
+    print("="*50 + "\n")
+    test_formulas = [Not(Not(p)), Implies(p, q), BiImplies(p, q), Not(And(p, q)), Or(And(p, q), r)]
+    for f in test_formulas:
+        print(f"Original: {f}")
+        print(f"CNF:      {f.to_cnf()}")
+        print("-" * 40)
+
+    # --- Section 2: Entailment Demo ---
+    print("\n" + "="*50)
+    print("2. TESTING ENTAILMENT ENGINE")
+    print("="*50 + "\n")
+    kb = [Implies(p, q), p]
+    print(f"KB: {kb}")
+    print(f"KB entails q:  {check_entailment(kb, q)}")
+    print(f"KB entails ~q: {check_entailment(kb, Not(q))}")
+
+    # --- Section 3: Revision Demo ---
+    print("\n" + "="*50)
+    print("3. AGENT LIFECYCLE DEMO")
+    print("="*50 + "\n")
+    bb = create_initial_belief_base()
+    print("Initial Belief Base:")
+    for f, s in bb.items(): print(f"  [{s}] {f}")
+    print(f"\nKB entails ~p? {check_entailment(list(bb.keys()), Not(p))}")
+    print("\nContracting by p (Resolving inconsistency):")
+    cb = contract(bb, p)
+    for f, s in cb.items(): print(f"  [{s}] {f}")
+    print("\nRevising by ~p (New belief with priority 10):")
+    rb = revise(bb, Not(p), 10)
+    for f, s in rb.items(): print(f"  [{s}] {f}")
+
+    # --- Section 4: Postulates ---
     test_agm_postulates()
